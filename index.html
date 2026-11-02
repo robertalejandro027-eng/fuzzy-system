@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#070b20">
+<title>Câmera Dinâmica VR — Halloween Azul</title>
+<style>
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#050817;color:#eaffff;font-family:system-ui,Arial,sans-serif;touch-action:none}
+canvas{display:block;width:100vw;height:100vh}
+#hud{position:fixed;inset:0;pointer-events:none;text-shadow:0 2px 6px #001}
+#brand{position:absolute;top:calc(10px + env(safe-area-inset-top));left:12px;font-weight:900;font-size:clamp(14px,4vw,22px);color:#9df7ff}
+#stats{position:absolute;top:44px;left:12px;font-size:13px}
+#hint{position:absolute;top:12px;right:12px;text-align:right;max-width:48vw;font-size:12px;opacity:.9}
+#msg{position:absolute;top:22%;left:50%;transform:translateX(-50%);width:90%;text-align:center;font-size:clamp(18px,5vw,28px);font-weight:900;color:#a0faff}
+#controls{position:absolute;bottom:calc(14px + env(safe-area-inset-bottom));left:0;right:0;display:flex;justify-content:space-between;align-items:flex-end;padding:0 16px}
+#pad{pointer-events:auto;touch-action:none;position:relative;width:116px;height:116px;border:2px solid #8ceeff99;border-radius:50%;background:#06162b99;box-shadow:0 0 22px #00c8ff33}
+#knob{position:absolute;left:32px;top:32px;width:48px;height:48px;border-radius:50%;background:#67eaffbb;border:2px solid #eaffff;box-shadow:0 0 14px #00cfff}
+.buttons{display:flex;flex-direction:column;gap:9px;pointer-events:auto}
+button{touch-action:manipulation;color:#e9fcff;border:1px solid #7eeaffaa;background:#06172dee;border-radius:13px;padding:12px 14px;font-weight:800;font-size:14px;box-shadow:0 0 16px #00bfff22}
+#overlay{position:fixed;z-index:10;inset:0;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;padding:24px;background:radial-gradient(ellipse at center,#10244df2,#03040dfc 72%)}
+#overlay h1{font-size:clamp(28px,8vw,46px);line-height:1.05;margin:0 0 12px;color:#7ef4ff;text-shadow:0 0 22px #00bfff}
+#overlay p{max-width:520px;line-height:1.5}
+#play{font-size:18px;padding:14px 30px;background:#07375b}
+.small{font-size:12px;opacity:.72}
+@media(max-height:500px){#pad{width:88px;height:88px}#knob{left:20px;top:20px;width:44px;height:44px}#controls{bottom:5px}}
+</style>
+</head>
+<body>
+<canvas id="game" aria-label="Jogo 3D Halloween Azul"></canvas>
+<div id="hud">
+  <div id="brand">🎃 CÂMERA DINÂMICA VR</div>
+  <div id="stats">Cristais: <span id="crystals">0</span>/3 · Vidas: <span id="lives">3</span></div>
+  <div id="hint">Esquerda: andar<br>Arraste a cena: olhar</div>
+  <div id="msg"></div>
+  <div id="controls">
+    <div id="pad"><div id="knob"></div></div>
+    <div class="buttons"><button id="jump">PULAR ↑</button><button id="restart">REINICIAR ↻</button></div>
+  </div>
+</div>
+<div id="overlay">
+  <h1>CÂMERA DINÂMICA VR</h1>
+  <p><b>Halloween Azul</b><br>Explore as ruínas, salte pelas pedras sobre a Lava Fantasma, encontre os 3 cristais e alcance o portal.</p>
+  <button id="play">JOGAR</button>
+  <p class="small">Protótipo HTML5 para navegador de celular. Requer internet para carregar o motor 3D.</p>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<script>
+(() => {
+  const canvas=document.getElementById('game');
+  const overlay=document.getElementById('overlay');
+  const msg=document.getElementById('msg');
+  const countEl=document.getElementById('crystals');
+  const livesEl=document.getElementById('lives');
+  const knob=document.getElementById('knob');
+  if(!window.THREE){
+    overlay.innerHTML='<h1>Não foi possível carregar o jogo</h1><p>Confira a conexão com a internet e abra este arquivo por uma hospedagem web HTTPS.</p>';
+    return;
+  }
+  const renderer=new THREE.WebGLRenderer({canvas,antialias:true});
+  renderer.setPixelRatio(Math.min(devicePixelRatio||1,1.6));
+  renderer.setSize(innerWidth,innerHeight);
+  renderer.shadowMap.enabled=true;
+  renderer.outputColorSpace=THREE.SRGBColorSpace;
+  const scene=new THREE.Scene();
+  scene.background=new THREE.Color(0x050817);
+  scene.fog=new THREE.FogExp2(0x070b20,.019);
+  const camera=new THREE.PerspectiveCamera(66,innerWidth/innerHeight,.1,160);
+  scene.add(new THREE.HemisphereLight(0x789cff,0x12101c,1.3));
+  const moon=new THREE.DirectionalLight(0x9bcaff,2.2);moon.position.set(-8,16,7);moon.castShadow=true;scene.add(moon);
+  const mat=(color,roughness=.8,emissive=0x000000,intensity=0)=>new THREE.MeshStandardMaterial({color,roughness,emissive,emissiveIntensity:intensity});
+  const groundMat=mat(0x171a2a), stoneMat=mat(0x353b50), darkMat=mat(0x0b1020);
+  const lavaMat=mat(0x007dff,.25,0x006dff,2.1);
+  const cyanMat=mat(0x32eaff,.25,0x00bfff,2.4);
+  const pumpkinMat=mat(0xff711b,.7,0x8a2100,.7);
+  const floor=new THREE.Mesh(new THREE.PlaneGeometry(100,100),groundMat);floor.rotation.x=-Math.PI/2;floor.position.y=-.55;floor.receiveShadow=true;scene.add(floor);
+  const lava=new THREE.Mesh(new THREE.PlaneGeometry(8,58,16,64),lavaMat);lava.rotation.x=-Math.PI/2;lava.position.set(0,-.27,-17);scene.add(lava);
+  const lavaLight=new THREE.PointLight(0x008cff,5,28);lavaLight.position.set(0,.3,-17);scene.add(lavaLight);
+  for(const x of [-4.12,4.12]){const edge=new THREE.Mesh(new THREE.BoxGeometry(.18,.3,58),cyanMat);edge.position.set(x,-.18,-17);scene.add(edge);}
+  const bubbles=[];
+  for(let i=0;i<44;i++){const b=new THREE.Mesh(new THREE.SphereGeometry(.07+Math.random()*.12,8,7),cyanMat);b.position.set((Math.random()-.5)*7,-.02,-45+Math.random()*55);scene.add(b);bubbles.push({m:b,y:b.position.y,p:Math.random()*6,s:.5+Math.random()*1.4});}
+  function box(x,y,z,sx,sy,sz,material){const m=new THREE.Mesh(new THREE.BoxGeometry(sx,sy,sz),material);m.position.set(x,y,z);m.castShadow=true;m.receiveShadow=true;scene.add(m);return m;}
+  box(0,-.05,8,13,.8,10,stoneMat);box(0,-.05,-45,13,.8,9,stoneMat);
+  const stones=[];
+  for(let i=0;i<9;i++){const z=4-i*5.5,x=(i%2===0?-1:1)*(0.8+Math.random()*.8);const m=new THREE.Mesh(new THREE.DodecahedronGeometry(1.1),stoneMat);m.scale.set(1.15,.35,1.45);m.position.set(x,.02,z);m.castShadow=true;scene.add(m);stones.push({x,z,m});}
+  for(let i=0;i<16;i++){const side=i%2===0?-1:1,z=11-Math.floor(i/2)*6.3,h=2.4+Math.random()*3;box(side*6.3,h/2-.1,z,.95,h,.95,darkMat);box(side*6.3,h+.1,z,1.35,.2,1.35,stoneMat);}
+  for(let i=0;i<12;i++){const x=(i%2===0?-1:1)*(7+Math.random()*3),z=8-Math.random()*50;const trunk=new THREE.Mesh(new THREE.CylinderGeometry(.15,.32,3.4,6),darkMat);trunk.position.set(x,1.2,z);scene.add(trunk);for(let j=0;j<3;j++){const branch=new THREE.Mesh(new THREE.CylinderGeometry(.05,.12,1.7,5),darkMat);branch.position.set(x+(Math.random()-.5),2.1+j*.2,z);branch.rotation.z=(Math.random()-.5)*1.7;scene.add(branch);}}
+  for(let i=0;i<13;i++){const x=(i%2===0?-1:1)*(5+Math.random()*2),z=8-Math.random()*48;const p=new THREE.Mesh(new THREE.SphereGeometry(.45,12,10),pumpkinMat);p.scale.y=.82;p.position.set(x,.23,z);scene.add(p);const stem=new THREE.Mesh(new THREE.CylinderGeometry(.05,.08,.2,6),mat(0x28431b));stem.position.set(x,.6,z);scene.add(stem);const l=new THREE.PointLight(0xff6a17,1.1,3.5);l.position.set(x,.65,z);scene.add(l);}
+  const dustCount=180,dustGeo=new THREE.BufferGeometry(),dustPos=new Float32Array(dustCount*3);
+  for(let i=0;i<dustCount;i++){dustPos[i*3]=(Math.random()-.5)*32;dustPos[i*3+1]=Math.random()*7;dustPos[i*3+2]=8-Math.random()*64;}
+  dustGeo.setAttribute('position',new THREE.BufferAttribute(dustPos,3));scene.add(new THREE.Points(dustGeo,new THREE.PointsMaterial({color:0x65dfff,size:.07,transparent:true,opacity:.65})));
+  const player=new THREE.Group();scene.add(player);
+  const body=new THREE.Mesh(new THREE.CapsuleGeometry(.38,.75,4,8),mat(0x3d7cff,.5,0x0a1e60,.25));body.position.y=.78;body.castShadow=true;player.add(body);
+  const head=new THREE.Mesh(new THREE.SphereGeometry(.31,14,10),mat(0xaadfff));head.position.y=1.5;player.add(head);
+  const eyeMat=new THREE.MeshBasicMaterial({color:0x061326});for(const x of [-.11,.11]){const e=new THREE.Mesh(new THREE.SphereGeometry(.04,8,8),eyeMat);e.position.set(x,1.55,.27);player.add(e);}
+  const scarf=new THREE.Mesh(new THREE.TorusGeometry(.29,.06,6,16),cyanMat);scarf.position.y=1.17;scarf.rotation.x=Math.PI/2;player.add(scarf);
+  const start=new THREE.Vector3(0,0,8);player.position.copy(start);
+  const crystals=[];
+  for(let i=0;i<3;i++){const z=1-i*15,x=(i%2===0?-1:1)*1.2;const c=new THREE.Mesh(new THREE.OctahedronGeometry(.48),cyanMat);c.position.set(x,.9,z);scene.add(c);const l=new THREE.PointLight(0x2deaff,1.8,5);l.position.copy(c.position);scene.add(l);crystals.push({m:c,l,got:false});}
+  const portal=new THREE.Group();portal.position.set(0,1.5,-45);scene.add(portal);const ring=new THREE.Mesh(new THREE.TorusGeometry(1.2,.13,10,36),cyanMat);portal.add(ring);const disc=new THREE.Mesh(new THREE.CircleGeometry(1.03,32),new THREE.MeshBasicMaterial({color:0x153d9a,transparent:true,opacity:.5,side:THREE.DoubleSide}));portal.add(disc);portal.add(new THREE.PointLight(0x00bfff,2.4,9));
+  let yaw=0,pitch=.18,moveX=0,moveY=0,vy=0,grounded=true,got=0,lives=3,started=false,won=false,lastHurt=0;
+  function say(t){msg.textContent=t;if(t)setTimeout(()=>{if(msg.textContent===t)msg.textContent='';},2600);}
+  document.getElementById('play').addEventListener('click',()=>{started=true;overlay.style.display='none';say('Encontre os 3 cristais mágicos!');});
+  document.getElementById('jump').addEventListener('pointerdown',e=>{e.preventDefault();if(grounded&&started){vy=6.2;grounded=false;}});
+  function reset(){player.position.copy(start);yaw=0;pitch=.18;vy=0;got=0;lives=3;won=false;started=true;countEl.textContent='0';livesEl.textContent='3';crystals.forEach(c=>{c.got=false;c.m.visible=true;c.l.visible=true;});overlay.style.display='none';say('A aventura recomeça!');}
+  document.getElementById('restart').addEventListener('click',reset);
+  const pad=document.getElementById('pad');let padId=null,center={x:0,y:0};
+  pad.addEventListener('pointerdown',e=>{e.preventDefault();padId=e.pointerId;pad.setPointerCapture(e.pointerId);const r=pad.getBoundingClientRect();center={x:r.left+r.width/2,y:r.top+r.height/2};padMove(e);});
+  pad.addEventListener('pointermove',e=>{if(e.pointerId===padId)padMove(e);});
+  function padEnd(e){if(e.pointerId===padId){padId=null;moveX=moveY=0;knob.style.transform='translate(0,0)';}}
+  pad.addEventListener('pointerup',padEnd);pad.addEventListener('pointercancel',padEnd);
+  function padMove(e){const dx=e.clientX-center.x,dy=e.clientY-center.y,n=Math.hypot(dx,dy)||1,k=Math.min(1,36/n);moveX=dx*k/36;moveY=-dy*k/36;knob.style.transform=`translate(${dx*k}px,${dy*k}px)`;}
+  let lookId=null,last={x:0,y:0};
+  canvas.addEventListener('pointerdown',e=>{if(e.clientX>innerWidth*.48&&e.clientY<innerHeight-145){lookId=e.pointerId;last={x:e.clientX,y:e.clientY};canvas.setPointerCapture(e.pointerId);}});
+  canvas.addEventListener('pointermove',e=>{if(e.pointerId===lookId){yaw-=(e.clientX-last.x)*.006;pitch=Math.max(-.25,Math.min(.65,pitch+(e.clientY-last.y)*.003));last={x:e.clientX,y:e.clientY};}});
+  function lookEnd(e){if(e.pointerId===lookId)lookId=null;}canvas.addEventListener('pointerup',lookEnd);canvas.addEventListener('pointercancel',lookEnd);
+  const keys={};addEventListener('keydown',e=>{keys[e.key.toLowerCase()]=true;if(e.code==='Space'&&grounded){vy=6.2;grounded=false;}});addEventListener('keyup',e=>keys[e.key.toLowerCase()]=false);
+  function hurt(){if(performance.now()-lastHurt<1100)return;lastHurt=performance.now();lives--;livesEl.textContent=lives;player.position.copy(start);vy=0;say(lives>0?'A lava fantasma queimou! Tente novamente.':'Fim de jogo! Toque em Reiniciar.');if(lives<=0){started=false;overlay.style.display='flex';document.getElementById('play').textContent='JOGAR NOVAMENTE';}}
+  function update(dt,t){
+    const mx=moveX+(keys.d?1:0)-(keys.a?1:0),my=moveY+(keys.w?1:0)-(keys.s?1:0),n=Math.hypot(mx,my)||1;
+    const ax=mx/Math.max(1,n),ay=my/Math.max(1,n);
+    const f=new THREE.Vector3(-Math.sin(yaw),0,-Math.cos(yaw)),r=new THREE.Vector3(Math.cos(yaw),0,-Math.sin(yaw));
+    const delta=r.multiplyScalar(ax).add(f.multiplyScalar(ay)).multiplyScalar(5*dt);player.position.add(delta);
+    vy-=16*dt;player.position.y+=vy*dt;if(player.position.y<=0){player.position.y=0;vy=0;grounded=true;}
+    if(delta.lengthSq()>.0001)player.rotation.y=Math.atan2(delta.x,delta.z);
+    const x=player.position.x,z=player.position.z;let safe=z>=3.1||z<=-41.4;
+    for(const s of stones)if(Math.abs(z-s.z)<1.25&&Math.abs(x-s.x)<1.3)safe=true;
+    if(z<3.1&&z>-41.4&&!safe&&player.position.y<.25)hurt();if(player.position.y<-2)hurt();
+    player.position.x=Math.max(-9,Math.min(9,player.position.x));
+    for(const c of crystals){if(!c.got&&player.position.distanceTo(c.m.position)<1.3){c.got=true;c.m.visible=false;c.l.visible=false;got++;countEl.textContent=got;say(got===3?'Portal ativado! Vá até o final!':'Cristal encontrado!');}}
+    if(got===3&&player.position.distanceTo(portal.position)<2.1&&!won){won=true;say('VOCÊ ESCAPOU! Feliz Halloween!');}
+    lava.position.y=-.27+Math.sin(t*.0015)*.04;lavaMat.emissiveIntensity=1.6+Math.sin(t*.002)*.5;lavaLight.intensity=4.5+Math.sin(t*.002)*1.2;
+    bubbles.forEach(b=>b.m.position.y=b.y+Math.sin(t*.001*b.s+b.p)*.15);
+    crystals.forEach(c=>{if(!c.got){c.m.rotation.y+=dt*1.5;c.m.position.y=.9+Math.sin(t*.002+c.m.position.z)*.13;c.l.position.copy(c.m.position);}});
+    portal.rotation.y=Math.sin(t*.0008)*.15;ring.rotation.z=t*.0004;
+    const target=new THREE.Vector3(player.position.x,player.position.y+1.2,player.position.z),dist=5.6;
+    const desired=new THREE.Vector3(target.x+Math.sin(yaw)*dist*Math.cos(pitch),target.y+1+Math.sin(pitch)*dist,target.z+Math.cos(yaw)*dist*Math.cos(pitch));
+    camera.position.lerp(desired,.13);camera.lookAt(target);
+  }
+  let lastTime=0;
+  function frame(t){requestAnimationFrame(frame);const dt=Math.min(.035,(t-lastTime)/1000||0);lastTime=t;if(started&&!won)update(dt,t);renderer.render(scene,camera);}
+  requestAnimationFrame(frame);
+  addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);renderer.setPixelRatio(Math.min(devicePixelRatio||1,1.6));});
+})();
+</script>
+</body>
+</html>
